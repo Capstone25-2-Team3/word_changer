@@ -3,8 +3,8 @@
 
 // 각 site별 selector모음(댓글 HTML 요소)
 const selectorsBySite = {
-    'Youtube': '.comment-renderer-text-content, #comment-text',
-    'DCinside': '.usertxt.ub-word',
+    'Youtube': '#content-text span', //댓글 대상으로만 작동함.
+    'DCinside': '.usertxt.ub-word', //댓글 대상으로만 작동함.
 }
 
 // =================================================================
@@ -39,7 +39,8 @@ function transformText(targetNode, site) {
             // 텍스트 변환 규칙 적용 (예: 특정 단어 치환)
             // transformedText = transformedText.replace(/원하는 단어/g, '변환된 단어');
 
-            // TODO: 여기에 실제 텍스트 변환 로직을 넣으세요.
+            // TODO: 여기에 실제 텍스트 변환 로직을 넣어야함.
+            
             // 예시: 텍스트를 모두 대문자로 바꾸기
             transformedText = "변환했습니다."
 
@@ -79,7 +80,7 @@ function runInitialScan(site) {
  * SPA(Single Page Application)에서 동적으로 로드되는 콘텐츠를 감지하기 위해
  * MutationObserver를 설정하는 함수입니다.
  */
-function setupMutationObserver() {
+function setupMutationObserver(site) {
     console.log('[텍스트 변환기] SPA 환경 감지: MutationObserver 설정 중');
 
     // MutationObserver 콜백 함수 정의
@@ -91,7 +92,7 @@ function setupMutationObserver() {
                     // Node.ELEMENT_NODE(1)만 처리하여 비효율적인 텍스트 노드 처리를 방지합니다.
                     if (node.nodeType === 1) {
                         // 새로 추가된 노드를 대상으로 텍스트 변환을 실행합니다.
-                        transformText(node);
+                        transformText(node, site);
                     }
                 });
             }
@@ -128,7 +129,7 @@ function setupMutationObserver() {
  */
 function handleYouTube() {
     console.log('[텍스트 변환기] YouTube 전용 핸들러 실행');
-    setupMutationObserver();
+    setupMutationObserver("Youtube");
 }
 
 /**
