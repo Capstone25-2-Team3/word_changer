@@ -3,6 +3,12 @@
   "name": "댓글 텍스트 변환기",
   "version": "1.0",
   "description": "사이트별로 댓글 및 기타 텍스트 콘텐츠를 탐색하고 변환하는 Chrome 확장 프로그램입니다.",
+  "background": {
+    "service_worker": "background.js" 
+  },
+  "action": { 
+    "default_title": "Google Drive에 텍스트 저장"
+  },
   "content_scripts": [
     {
       "matches": [
@@ -16,6 +22,16 @@
   ],
   "permissions": [
     "activeTab",
-    "storage"
-  ]
+    "storage",
+    "identity" 
+  ],
+  "host_permissions": [ 
+    "https://www.googleapis.com/"
+  ],
+  "oauth2": {
+    "client_id": "971522743683-3c9eh4hhhg0b7hplj58u1jdpod4s94q5.apps.googleusercontent.com", 
+    "scopes": [
+      "https://www.googleapis.com/auth/drive.file"
+    ]
+  }
 }
