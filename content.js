@@ -16,6 +16,99 @@ const nonSPASites = [
     'dcinside.com'
 ]
 
+
+// CSS 스타일 추가
+function injectStyles() {
+    // 이미 스타일이 주입되었는지 확인하는 식별자
+    if (document.getElementById('transformation-styles')) {
+        return; 
+    }
+
+    const style = document.createElement('style');
+    style.id = 'transformation-styles'; // ID를 부여하여 중복 주입 방지
+    
+    // ⭐ 이전 답변에서 제안된 블라인드 효과를 위한 CSS 정의를 문자열로 삽입합니다.
+    style.textContent = `
+        .text-blur-in-progress { 
+            /* 블러 효과를 추가하여 작업 중임을 시각적으로 표현 */
+            filter: blur(4px); 
+            /* 부드러운 전환 효과 (선택 사항) */
+            transition: color 0.3s, filter 0.3s;
+            /* 배경색을 추가하여 글자 영역을 가려 블라인드 느낌 강조 (선택 사항) */
+            /* background-color: #f0f0f0; */ 
+        }
+    `;
+
+    document.head.appendChild(style);
+    console.log("[CSS 주입] 'text-blur-in-progress' 스타일이 DOM에 추가되었습니다.");
+}
+
+// --- 함수 사용 예시 ---
+
+function createRequestBody(textList) {
+    // 입력된 리스트를 'texts'라는 키의 값으로 할당합니다.
+    const requestBody = {
+        texts: textList
+    };
+
+    return requestBody;
+}
+
+const apiUrl = 'http://3.38.171.195:8000/predict';
+
+// 함수 실행 및 결과 처리
+async function runPostExample(formData, elementList) {
+    console.log('서버로 데이터를 전송합니다 (Background Script 이용)...');
+    
+    try {
+        // Background Script로 POST 요청을 위임하는 메시지 전송
+        const response = await chrome.runtime.sendMessage({
+            action: 'POST_REQUEST', // Background Script에서 확인할 액션 타입
+            url: apiUrl,
+            data: formData
+        });
+
+        const responseData = response.data;
+
+        // 1. responseData의 모든 속성 값(Value)을 배열로 만듭니다.
+        //    (내부 객체들 + length: 11)
+        const allValues = Object.values(responseData);
+
+        // 2. 이 값들 중에서 'length' (숫자)를 제외하고, 순수한 객체(Object)만 필터링합니다.
+        const innerObjects = allValues.filter(value => typeof value === 'object');
+
+        // 3. 필터링된 모든 내부 객체들을 하나의 새로운 객체(딕셔너리)로 병합합니다.
+        //    Object.assign({}, ...innerObjects) 또는 { ...innerObjects[0], ...innerObjects[1], ... }와 동일
+
+        const combinedDictionary = Object.assign({}, ...innerObjects);
+
+        console.log(combinedDictionary);
+
+        if (response && response.success) {
+            elementList.forEach(element => {
+            const originalText = element.textContent;
+            if (originalText in combinedDictionary) {
+                element.textContent = combinedDictionary[originalText];
+                element.setAttribute('data-text-transformed', 'true');
+                element.classList.remove('text-blur-in-progress');
+            } else {
+                // 변환 결과가 없는 경우 원본 텍스트 유지
+                console.warn(`경고: 원본 텍스트 "${originalText}"에 대한 변환 결과를 찾을 수 없어 원본 유지.`);
+            }
+        });
+            return response.data;
+        } else if (response && response.error) {
+            // Background Script에서 fetch가 실패하여 받은 오류 처리
+            throw new Error(`Background Fetch Failed: ${response.error}`);
+        } else {
+            // 메시지 통신 자체의 실패 (예: 리스너가 없을 때)
+            throw new Error('Message communication failed or no response received.');
+        }
+
+    } catch (error) {
+        console.log('❌ 데이터 전송에 실패했습니다. (통신 오류 포함):', error);
+    }
+}
 // =================================================================
 // 0. 비동기 크롤링 요청
 // =================================================================
@@ -80,32 +173,31 @@ function transformText(targetNode, site) {
     if (targetNode.nodeType === 1) { // Node.ELEMENT_NODE
         const unhandledSelector = selectors + ':not([data-text-transformed="true"])';
         const elements = targetNode.querySelectorAll(unhandledSelector);
-        
+        sentences = []
         elements.forEach(element => {
-            // 변환 로직 실행
             let originalText = element.textContent;
-            let transformedText = originalText;
-            
+            sentences.push(originalText);
             // 크롤링하기 위한 코드
             if (originalText.trim().length > 0) {
                 let cleanedText = originalText.replace(/@.*?\)\s*/g, '').trim(); 
                 cleanedText = cleanedText.replace(/- dc App$/, '').trim();
                 allContents.push(cleanedText);
-                console.log('✅ 텍스트 수집 성공. 현재 누적 개수:', allContents.length);
             }
-
-            // TODO: 여기에 실제 텍스트 변환 로직을 넣어야함.
-            
-            // 예시: 텍스트를 모두 대문자로 바꾸기
-            transformedText = "변환했습니다."
-
-            // 변환된 텍스트로 업데이트
-            if (originalText !== transformedText) {
-                element.textContent = transformedText;
-                // 변환된 요소임을 표시하는 속성을 추가하여 중복 변환을 방지할 수 있습니다.
-                element.setAttribute('data-text-transformed', 'true');
-            }
-        });
+            element.classList.add('text-blur-in-progress');
+        })
+        console.log(`[텍스트 변환 대상 탐색 완료] 변환 대상 개수: ${elements.length}`);
+        // GPT를 통한 변환 로직 추가(Directory형식으로 받을 예정임)
+        if (elements.length != 0)
+            runPostExample(createRequestBody(sentences), elements);
+        // setTimeout(() => {
+        //     elements.forEach(element => {
+        //         const originalText = element.textContent;
+        //         element.classList.remove('text-blur-in-progress');
+        //         element.setAttribute('data-text-transformed', 'true');
+        //         element.textContent = "변환완료되었습니다."
+        //     })
+        // }, 10000);
+        // 3. 변환된 텍스트로 DOM 업데이트
     }
 }
 
@@ -242,7 +334,7 @@ function handlePageNavigation() {
     
 })(window.history);
 
-
+injectStyles();
 main();
 
 setInterval(checkAndUploadContent, CHECK_INTERVAL);

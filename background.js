@@ -1,4 +1,5 @@
 // background.js
+importScripts('serverconnect.js');
 
 // 1. 설정 값
 const CLIENT_ID = "971522743683-3c9eh4hhhg0b7hplj58u1jdpod4s94q5.apps.googleusercontent.com"; // manifest.json의 client_id와 동일
@@ -38,19 +39,15 @@ async function uploadTextFile(textContent, fileName) {
       // FOLDER_ID가 설정되어 있으면 해당 폴더에 저장합니다.
       ...(FOLDER_ID && { parents: [FOLDER_ID] })
     };
-
-    // 요청 본문(Body) 구성
-    const body = `
---${boundary}
-Content-Type: application/json; charset=UTF-8
-
-${JSON.stringify(metadata)}
---${boundary}
-Content-Type: text/plain
-
-${textContent}
---${boundary}--
-`.trim();
+    // 요청 본문(Body) 구성 - CRLF(\r\n)로 명확히 구분
+    const body =
+      `--${boundary}\r\n` +
+      `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
+      `${JSON.stringify(metadata)}\r\n` +
+      `--${boundary}\r\n` +
+      `Content-Type: text/plain\r\n\r\n` +
+      `${textContent}\r\n` +
+      `--${boundary}--`;
 
     // 4. Drive API 호출 (파일 업로드)
     const response = await fetch(UPLOAD_URL, {
@@ -75,7 +72,8 @@ ${textContent}
 
   } catch (error) {
     console.error("파일 업로드 중 오류 발생:", error);
-    // alert(`파일 업로드 오류: ${error.message}`);
+    // 에러를 호출자에게 전달하여 호출 측에서 처리하도록 함
+    throw error;
   }
 }
 
@@ -85,14 +83,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         
         // uploadTextFile 함수를 호출하고 결과를 Content Script로 다시 보냅니다.
         uploadTextFile(request.textContent, request.fileName)
-            .then(fileId => {
-                // 성공적으로 파일 ID를 받은 경우 응답
-                sendResponse({ status: "success", fileId: fileId });
-            })
-            .catch(error => {
-                // 오류 발생 시 응답
-                sendResponse({ status: "error", error: error.message });
-            });
+          .then(fileId => {
+            if (fileId) {
+              sendResponse({ status: "success", fileId: fileId });
+            } else {
+              console.error("업로드 함수가 성공적으로 끝났지만 fileId가 없습니다.");
+              sendResponse({ status: "error", error: "fileId가 반환되지 않았습니다." });
+            }
+          })
+          .catch(error => {
+            console.error("uploadTextFile 예외:", error);
+            sendResponse({ status: "error", error: (error && error.message) || String(error) });
+          });
             
         // 중요: 비동기 응답을 위해 true를 반환해야 Chrome이 응답을 기다립니다.
         return true; 
