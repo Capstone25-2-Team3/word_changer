@@ -54,7 +54,7 @@ function createRequestBody(textList) {
     return requestBody;
 }
 
-const apiUrl = 'http://3.38.171.195:8000/predict';
+const apiUrl = 'http://3.36.11.128:8000/predict';
 
 // 함수 실행 및 결과 처리
 async function runPostExample(formData, elementList) {
@@ -86,14 +86,18 @@ async function runPostExample(formData, elementList) {
 
         if (response && response.success) {
             elementList.forEach(element => {
-            const originalText = element.textContent;
+            const originalText = element.getAttribute('data-original-text');
             if (originalText in combinedDictionary) {
                 element.textContent = combinedDictionary[originalText];
                 element.setAttribute('data-text-transformed', 'true');
+                element.removeAttribute('data-original-text');
                 element.classList.remove('text-blur-in-progress');
             } else {
                 // 변환 결과가 없는 경우 원본 텍스트 유지
                 console.warn(`경고: 원본 텍스트 "${originalText}"에 대한 변환 결과를 찾을 수 없어 원본 유지.`);
+                if (element.classList.contains('text-blur-in-progress')) {
+                    element.classList.remove('text-blur-in-progress');
+                }
             }
         });
             return response.data;
@@ -177,6 +181,8 @@ function transformText(targetNode, site) {
         elements.forEach(element => {
             let originalText = element.textContent;
             sentences.push(originalText);
+
+            element.setAttribute('data-original-text', originalText);
             // 크롤링하기 위한 코드
             if (originalText.trim().length > 0) {
                 let cleanedText = originalText.replace(/@.*?\)\s*/g, '').trim(); 
@@ -189,15 +195,6 @@ function transformText(targetNode, site) {
         // GPT를 통한 변환 로직 추가(Directory형식으로 받을 예정임)
         if (elements.length != 0)
             runPostExample(createRequestBody(sentences), elements);
-        // setTimeout(() => {
-        //     elements.forEach(element => {
-        //         const originalText = element.textContent;
-        //         element.classList.remove('text-blur-in-progress');
-        //         element.setAttribute('data-text-transformed', 'true');
-        //         element.textContent = "변환완료되었습니다."
-        //     })
-        // }, 10000);
-        // 3. 변환된 텍스트로 DOM 업데이트
     }
 }
 
