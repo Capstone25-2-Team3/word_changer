@@ -54,12 +54,10 @@ function createRequestBody(textList) {
     return requestBody;
 }
 
-const apiUrl = 'http://3.36.11.128:8000/predict';
+const apiUrl = 'http://3.39.120.138:8000/predict';
 
 // 함수 실행 및 결과 처리
 async function runPostExample(formData, elementList) {
-    console.log('서버로 데이터를 전송합니다 (Background Script 이용)...');
-    
     try {
         // Background Script로 POST 요청을 위임하는 메시지 전송
         const response = await chrome.runtime.sendMessage({
@@ -92,12 +90,7 @@ async function runPostExample(formData, elementList) {
                 element.setAttribute('data-text-transformed', 'true');
                 element.removeAttribute('data-original-text');
                 element.classList.remove('text-blur-in-progress');
-            } else {
-                // 변환 결과가 없는 경우 원본 텍스트 유지
-                console.warn(`경고: 원본 텍스트 "${originalText}"에 대한 변환 결과를 찾을 수 없어 원본 유지.`);
-                if (element.classList.contains('text-blur-in-progress')) {
-                    element.classList.remove('text-blur-in-progress');
-                }
+                console.log(`[변환 완료] 원본: "${originalText}" -> 변환 후: "${combinedDictionary[originalText]}"`);
             }
         });
             return response.data;
@@ -172,7 +165,6 @@ function transformText(targetNode, site) {
     // TODO: 변환 대상이 되는 선택자를 사이트별로 정의해야 합니다.
     // 예시: 댓글, 게시글 본문 등
     const selectors = selectorsBySite[site];
-    console.log(`[텍스트 변환 함수 시작]`);
     // targetNode가 Element인 경우에만 querySelectorAll을 사용
     if (targetNode.nodeType === 1) { // Node.ELEMENT_NODE
         const unhandledSelector = selectors + ':not([data-text-transformed="true"])';
@@ -190,11 +182,16 @@ function transformText(targetNode, site) {
                 allContents.push(cleanedText);
             }
             element.classList.add('text-blur-in-progress');
+            if(sentences.length >= 2){
+                runPostExample(createRequestBody(sentences), elements);
+                sentences.length = 0;
+            }
         })
-        console.log(`[텍스트 변환 대상 탐색 완료] 변환 대상 개수: ${elements.length}`);
         // GPT를 통한 변환 로직 추가(Directory형식으로 받을 예정임)
-        if (elements.length != 0)
+        if (sentences.length != 0){
             runPostExample(createRequestBody(sentences), elements);
+            sentences.length = 0;
+        }
     }
 }
 
