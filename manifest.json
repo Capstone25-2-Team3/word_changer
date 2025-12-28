@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Word Changer",
+  "version": "1.0",
+  "description": "사이트별로 댓글 및 기타 텍스트 콘텐츠를 탐색하고 변환하는 Chrome 확장 프로그램입니다.",
+  "permissions": ["contextMenus", "storage"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": { 
+    "default_popup": "popup.html",
+    "default_title": "server와 연결"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.youtube.com/*",
+        "*://*.dcinside.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["inject.js"],
+      "matches": ["*://*.youtube.com/*", "*://*.dcinside.com/*"]
+    }
+  ]
+}
