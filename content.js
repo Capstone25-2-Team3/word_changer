@@ -145,7 +145,12 @@ function transformText(targetNode, site) {
             }
             else {
                 sentences.push(originalText);
+
                 element.setAttribute('data-original-text', originalText);
+
+                // 기능 추가 : 신고용 원문 보존(변환 완료 후 data-original-text가 지워지므로 별도 유지)
+                element.setAttribute('data-original-text-for-report', originalText);
+
                 element.classList.add('text-blur-in-progress');
                 if(sentences.length >= 2){
                     runPostExample(createRequestBody(sentences), elements);
@@ -301,3 +306,183 @@ window.addEventListener('popstate', handleNavigation);
 
 injectStyles();
 main();
+
+
+// 기능 추가 : 신고 데이터 수집 유틸 및 메시지 핸들러
+
+// 기능 추가 : 동일 원문 중복 신고 방지(Set)
+const reportedHashes = new Set();
+
+// 기능 추가 : sha256(hex) 계산 (원문 기반 중복 제거용)
+async function sha256Hex(str) {
+    const enc = new TextEncoder();
+    const buf = await crypto.subtle.digest('SHA-256', enc.encode(str));
+    return Array.from(new Uint8Array(buf))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
+}
+
+// 기능 추가 : 플랫폼 판별
+function detectPlatform() {
+    const h = window.location.hostname;
+    if (h.includes('youtube.com')) return 'youtube';
+    if (h.includes('dcinside.com')) return 'dcinside';
+    return 'unknown';
+}
+
+// 기능 추가 : 변환 완료된 댓글 수집
+async function collectTransformed(site) {
+    const selectors = selectorsBySite[site];
+    if (!selectors) return [];
+
+    // 변환 완료된 댓글만 수집
+    const transformedElements = document.querySelectorAll(
+        `${selectors}[data-text-transformed="true"]`
+    );
+
+    const results = [];
+    const platform = detectPlatform();
+    const url = window.location.href;
+
+    for (const el of transformedElements) {
+        const original = el.getAttribute('data-original-text-for-report');
+        const transformedText = el.textContent;
+
+        if (!original || !original.trim()) continue;
+
+        const hash = await sha256Hex(original);
+
+        if (reportedHashes.has(hash)) continue;
+        reportedHashes.add(hash);
+
+        results.push({
+            comment_id: crypto.randomUUID(),
+            original_text: original,
+            transformed_text: transformedText,
+            url,
+            platform,
+            timestamp: new Date().toISOString(),
+            model_version: "kobert_v1",
+            predicted_labels: {},
+            hash
+        });
+    }
+
+    return results;
+}
+
+// 기능 추가 : 신고 모드에서 “선택된 댓글(1개)” 저장 상태
+let reportModeEnabled = false;
+let selectedReport = null;
+let selectedElement = null;
+
+// 기능 추가 : 선택 하이라이트 스타일 주입 (기존 injectStyles는 건드리지 않음)
+(function injectReportSelectStyles() {
+    if (document.getElementById('report-select-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'report-select-styles';
+    style.textContent = `
+        .report-selected-comment {
+            outline: 2px solid #2196F3;
+            border-radius: 6px;
+        }
+    `;
+    document.head.appendChild(style);
+})();
+
+// 기능 추가 : 신고용 클릭 선택은 “댓글 컨테이너”를 잡아야 하므로 selector를 별도로 둠
+const reportSelectorsBySite = {
+    'Youtube': '#content-text',     // span보다 상위 컨테이너가 클릭 선택에 유리
+    'DCinside': '.usertxt.ub-word'
+};
+
+// 기능 추가 : 신고 모드 ON 시, 사용자가 클릭한 댓글을 선택
+document.addEventListener('click', async (e) => {
+    if (!reportModeEnabled) return;
+
+    const hostname = window.location.hostname;
+    const site = hostname.includes('youtube.com') ? 'Youtube'
+              : hostname.includes('dcinside.com') ? 'DCinside'
+              : 'default';
+
+    const selector = reportSelectorsBySite[site];
+    if (!selector) return;
+
+    const commentEl = e.target.closest(selector);
+    if (!commentEl) return;
+
+    // 변환된 댓글만 선택 대상으로
+    if (commentEl.getAttribute('data-text-transformed') !== 'true') return;
+
+    const original = commentEl.getAttribute('data-original-text-for-report');
+    const transformedText = commentEl.textContent || '';
+    if (!original || !original.trim()) return;
+
+    // 기존 선택 하이라이트 제거
+    if (selectedElement) selectedElement.classList.remove('report-selected-comment');
+    selectedElement = commentEl;
+    selectedElement.classList.add('report-selected-comment');
+
+    const hash = await sha256Hex(original);
+
+    selectedReport = {
+        comment_id: crypto.randomUUID(),
+        original_text: original,
+        transformed_text: transformedText,
+        url: window.location.href,
+        platform: detectPlatform(),
+        timestamp: new Date().toISOString(),
+        model_version: "kobert_v1",
+        predicted_labels: {},
+        hash
+    };
+}, true);
+
+// 기능 추가 : popup에서 SET_REPORT_MODE / GET_SELECTED_REPORT / CLEAR_SELECTED_REPORT 요청 수신
+chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
+
+    if (req.action === 'SET_REPORT_MODE') {
+        reportModeEnabled = !!req.enabled;
+        sendResponse({ ok: true, enabled: reportModeEnabled });
+        return false;
+    }
+
+    if (req.action === 'GET_SELECTED_REPORT') {
+        sendResponse({ selected: selectedReport });
+        return false;
+    }
+
+    if (req.action === 'CLEAR_SELECTED_REPORT') {
+        if (selectedElement) selectedElement.classList.remove('report-selected-comment');
+        selectedElement = null;
+        selectedReport = null;
+        sendResponse({ ok: true });
+        return false;
+    }
+
+    // 기능 추가 : 기존(전체 수집) 요청도 유지
+    if (req.action === 'COLLECT_TRANSFORMED') {
+        const hostname = window.location.hostname;
+        const site = hostname.includes('youtube.com') ? 'Youtube'
+                    : hostname.includes('dcinside.com') ? 'DCinside'
+                    : 'default';
+
+        collectTransformed(site)
+            .then(comments => {
+                sendResponse({
+                    payload: {
+                        comments,
+                        extension_version: "1.0",
+                        report_type: "fine_tuning_collection"
+                    }
+                });
+            })
+            .catch(err => {
+                sendResponse({ error: err.message });
+            });
+
+        return true; // async sendResponse
+    }
+
+    return false;
+});

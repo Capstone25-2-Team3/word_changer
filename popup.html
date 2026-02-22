@@ -38,6 +38,46 @@
     }
     input:checked + .slider { background-color: #2196F3; }
     input:checked + .slider:before { transform: translateX(20px); }
+
+    /* 기능 추가 : 신고 UI 스타일 */
+    .report-section {
+      margin-top: 15px;
+    }
+    .report-btn {
+      width: 100%;
+      padding: 8px;
+      cursor: pointer;
+    }
+    .report-status {
+      margin-top: 6px;
+      font-size: 12px;
+      color: #555;
+    }
+    /* 기능 추가 : 선택 댓글 미리보기 스타일 */
+    .report-preview {
+      margin-top: 8px;
+      padding: 8px;
+      border: 1px solid #eee;
+      border-radius: 6px;
+      font-size: 12px;
+      color: #333;
+      max-height: 90px;
+      overflow: auto;
+      background: #fafafa;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    /* 기능 추가 : 작은 버튼 영역 */
+    .report-actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .report-actions button {
+      flex: 1;
+      padding: 8px;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
@@ -55,6 +95,31 @@
       <span class="slider"></span>
     </label>
   </div>
+
+  <!-- 기능 추가 : 신고 모드 토글 + 선택 신고 UI -->
+  <div class="menu-item" style="border-bottom:none;">
+    <span>신고 모드</span>
+    <label class="switch">
+      <input type="checkbox" id="report-mode-toggle">
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <div class="report-section">
+    <div style="font-size:12px;color:#666;margin-bottom:6px;">
+      신고 모드 ON 후, 페이지에서 문제 댓글을 클릭하세요.
+    </div>
+
+    <div id="report-preview" class="report-preview">선택된 댓글이 없습니다.</div>
+
+    <div class="report-actions">
+      <button id="report-btn" class="report-btn">선택 댓글 신고</button>
+      <button id="report-clear-btn" class="report-btn">선택 해제</button>
+    </div>
+
+    <div id="report-status" class="report-status"></div>
+  </div>
+
   <script src="popup.js"></script>
 </body>
 </html>
