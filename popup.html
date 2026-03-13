@@ -3,13 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <style>
-    body { width: 220px; padding: 15px; font-family: sans-serif; }
+    body {
+      width: 260px;
+      padding: 15px;
+      font-family: sans-serif;
+      /* 기능 추가 : 팝업 배경을 살짝 회색톤으로 변경 */
+      background-color: #f3f4f6;
+    }
     .menu-item {
       display: flex;
       justify-content: space-between;
       align-items: center;
       padding: 10px 0;
-      border-bottom: 1px solid #eee;
+      border-bottom: 1px solid #ddd;
     }
     /* 슬라이드 스위치 스타일 */
     .switch {
@@ -38,23 +44,215 @@
     }
     input:checked + .slider { background-color: #2196F3; }
     input:checked + .slider:before { transform: translateX(20px); }
+
+    /* 기능 추가 : 신고 UI 스타일 */
+    .report-section {
+      margin-top: 15px;
+    }
+    .report-status {
+      margin-top: 6px;
+      font-size: 12px;
+      color: #555;
+      white-space: pre-wrap;
+    }
+    .report-preview {
+      margin-top: 8px;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 12px;
+      color: #333;
+      max-height: 110px;
+      overflow: auto;
+      background: #ffffff;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .report-actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .report-actions button {
+      flex: 1;
+      padding: 8px;
+      cursor: pointer;
+      border: 1px solid #aaa;
+      border-radius: 6px;
+      background: #fff;
+    }
+
+    /* 기능 추가 : 상세 신고 화면 스타일 */
+    .hidden {
+      display: none;
+    }
+    .detail-title {
+      font-size: 16px;
+      font-weight: bold;
+      text-align: center;
+      margin-bottom: 12px;
+    }
+    .detail-subtitle {
+      font-size: 12px;
+      color: #666;
+      text-align: center;
+      margin-bottom: 12px;
+    }
+    .problem-box {
+      border: 1px solid #ddd;
+      background: #ffffff;
+      border-radius: 8px;
+      margin-bottom: 14px;
+    }
+    .problem-box-header {
+      background: #e5e7eb;
+      padding: 8px;
+      font-size: 12px;
+      color: #555;
+      border-top-left-radius: 8px;
+      border-top-right-radius: 8px;
+    }
+    .problem-box-body {
+      padding: 10px;
+      font-size: 14px;
+      color: #222;
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
+    .category-group {
+      margin-top: 10px;
+    }
+    .category-title {
+      font-weight: bold;
+      margin-bottom: 10px;
+      font-size: 14px;
+    }
+    .category-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 10px 0;
+      font-size: 14px;
+    }
+    .detail-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 18px;
+    }
+    .detail-actions button {
+      flex: 1;
+      padding: 10px;
+      cursor: pointer;
+      border-radius: 8px;
+      border: 1px solid #aaa;
+      background: #fff;
+    }
+    .submit-btn {
+      background: #2563eb !important;
+      color: white;
+      border: none !important;
+    }
   </style>
 </head>
 <body>
-  <div class="menu-item">
-    <span>혐오 표현 Blur</span>
-    <label class="switch">
-      <input type="checkbox" id="blur-toggle">
-      <span class="slider"></span>
-    </label>
+  <!-- 기능 추가 : 메인 화면 -->
+  <div id="main-view">
+    <div class="menu-item">
+      <span>혐오 표현 Blur</span>
+      <label class="switch">
+        <input type="checkbox" id="blur-toggle">
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="menu-item">
+      <span>혐오 표현 순화</span>
+      <label class="switch">
+        <input type="checkbox" id="soft-toggle">
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="menu-item" style="border-bottom:none;">
+      <span>신고 모드</span>
+      <label class="switch">
+        <input type="checkbox" id="report-mode-toggle">
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="report-section">
+      <div style="font-size:12px;color:#666;margin-bottom:6px;">
+        신고 모드 ON 후, 페이지 댓글 왼쪽 체크박스를 선택하세요.
+      </div>
+
+      <div id="report-preview" class="report-preview">선택된 댓글이 없습니다.</div>
+
+      <div class="report-actions">
+        <button id="report-btn">선택 댓글 신고</button>
+        <button id="report-clear-btn">선택 해제</button>
+      </div>
+
+      <div id="report-status" class="report-status"></div>
+    </div>
   </div>
-  <div class="menu-item">
-    <span>혐오 표현 순화</span>
-    <label class="switch">
-      <input type="checkbox" id="soft-toggle">
-      <span class="slider"></span>
-    </label>
+
+  <!-- 기능 추가 : 신고 상세 입력 화면 -->
+  <div id="detail-view" class="hidden">
+    <div class="detail-title">순화 표현 제안</div>
+    <div class="detail-subtitle">부적절한 댓글을 어떤 유형으로 신고할지 선택해주세요.</div>
+
+    <div class="problem-box">
+      <div class="problem-box-header">문제 댓글</div>
+      <div id="detail-problem-text" class="problem-box-body"></div>
+    </div>
+
+    <div class="category-group">
+      <div class="category-title">어떻게 분류해야 하나요?</div>
+
+      <label class="category-item">
+        <input type="radio" name="report-category" value="성별 및 성소수자">
+        <span>성별 및 성소수자</span>
+      </label>
+
+      <label class="category-item">
+        <input type="radio" name="report-category" value="지역 비하">
+        <span>지역 비하</span>
+      </label>
+
+      <label class="category-item">
+        <input type="radio" name="report-category" value="위협 및 협박">
+        <span>위협 및 협박</span>
+      </label>
+
+      <label class="category-item">
+        <input type="radio" name="report-category" value="인종 비하">
+        <span>인종 비하</span>
+      </label>
+
+      <label class="category-item">
+        <input type="radio" name="report-category" value="나이 비하">
+        <span>나이 비하</span>
+      </label>
+
+      <label class="category-item">
+        <input type="radio" name="report-category" value="종교 비하">
+        <span>종교 비하</span>
+      </label>
+
+      <label class="category-item">
+        <input type="radio" name="report-category" value="기타">
+        <span>기타</span>
+      </label>
+    </div>
+
+    <div class="detail-actions">
+      <button id="detail-cancel-btn">취소</button>
+      <button id="detail-submit-btn" class="submit-btn">제안 제출</button>
+    </div>
+
+    <div id="detail-status" class="report-status"></div>
   </div>
+
   <script src="popup.js"></script>
 </body>
 </html>
