@@ -21,9 +21,10 @@ let globalDictionary = {};
 let isBlurActive = false;
 let isSoftActive = false;
 
-// 기능 추가 : 신고 모드 상태 및 선택된 댓글 저장소
+// 기능 추가 : 신고 모드 상태 및 단일 선택 댓글 저장소
 let reportModeEnabled = false;
-let selectedReports = new Map();
+let selectedReport = null;
+let selectedReportTargetId = null;
 
 // CSS 스타일 추가
 function injectStyles() {
@@ -83,7 +84,7 @@ function createRequestBody(textList) {
     return requestBody;
 }
 
-const apiUrl = 'http://3.39.120.138:8000/predict';
+const apiUrl = 'http://13.125.69.33:8000/predict';
 
 // 기능 추가 : 신고 체크박스용 유니크 id 시퀀스
 let reportTargetIdCounter = 0;
@@ -152,7 +153,19 @@ function getReportTargetElementFromDataElement(element, site) {
     return element;
 }
 
-// 기능 추가 : 체크박스 선택 시 선택된 댓글 Map에 반영
+// 기능 추가 : 단일 선택만 유지하도록 기존 선택 해제
+function clearPreviousSelectionUI() {
+    document.querySelectorAll('.report-checkbox').forEach(cb => {
+        cb.checked = false;
+    });
+    document.querySelectorAll('[data-report-checkbox-initialized="true"]').forEach(el => {
+        el.classList.remove('report-selected-comment');
+    });
+    selectedReport = null;
+    selectedReportTargetId = null;
+}
+
+// 기능 추가 : 체크박스 선택 시 단일 선택 댓글 저장
 async function updateSelectedReport(targetElement, checked, site) {
     const dataElement = getReportDataElement(targetElement, site);
     if (!dataElement) return;
@@ -163,25 +176,31 @@ async function updateSelectedReport(targetElement, checked, site) {
 
     if (!original || !original.trim()) return;
 
+    if (!checked) {
+        clearPreviousSelectionUI();
+        return;
+    }
+
     const hash = await sha256Hex(original);
 
-    if (checked) {
-        selectedReports.set(targetId, {
-            comment_id: crypto.randomUUID(),
-            original_text: original,
-            transformed_text: transformedText,
-            url: window.location.href,
-            platform: detectPlatform(),
-            timestamp: new Date().toISOString(),
-            model_version: "kobert_v1",
-            predicted_labels: {},
-            hash
-        });
-        targetElement.classList.add('report-selected-comment');
-    } else {
-        selectedReports.delete(targetId);
-        targetElement.classList.remove('report-selected-comment');
-    }
+    clearPreviousSelectionUI();
+
+    const currentCheckbox = targetElement.parentNode?.querySelector('.report-checkbox-wrapper .report-checkbox');
+    if (currentCheckbox) currentCheckbox.checked = true;
+
+    targetElement.classList.add('report-selected-comment');
+    selectedReportTargetId = targetId;
+    selectedReport = {
+        comment_id: crypto.randomUUID(),
+        original_text: original,
+        transformed_text: transformedText,
+        url: window.location.href,
+        platform: detectPlatform(),
+        timestamp: new Date().toISOString(),
+        model_version: "kobert_v1",
+        predicted_labels: {},
+        hash
+    };
 }
 
 // 기능 추가 : 댓글 요소 옆에 체크박스 주입
@@ -196,11 +215,12 @@ function addReportCheckboxToElement(targetElement, site) {
     const original = dataElement.getAttribute('data-original-text-for-report');
     if (!original || !original.trim()) return;
 
-    ensureReportTargetId(targetElement);
+    const targetId = ensureReportTargetId(targetElement);
 
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.className = 'report-checkbox';
+    checkbox.checked = selectedReportTargetId === targetId;
 
     const wrapper = document.createElement('span');
     wrapper.className = 'report-checkbox-wrapper';
@@ -232,7 +252,8 @@ function removeAllReportCheckboxes() {
         el.classList.remove('report-selected-comment');
     });
 
-    selectedReports.clear();
+    selectedReport = null;
+    selectedReportTargetId = null;
 }
 
 // 기능 추가 : 신고 모드 ON 시 현재 변환된 댓글에 체크박스 일괄 주입
@@ -510,7 +531,8 @@ function handleNavigation() {
         globalDictionary = {}; // URL 변경 시 사전 초기화
 
         // 기능 추가 : 페이지 이동 시 신고 선택 초기화
-        selectedReports.clear();
+        selectedReport = null;
+        selectedReportTargetId = null;
 
         main(); // Observer 재설정 및 변환 실행
     }
@@ -552,14 +574,16 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
         return false;
     }
 
-    if (req.action === 'GET_SELECTED_REPORTS') {
+    // 기능 추가 : 단일 선택 댓글 반환
+    if (req.action === 'GET_SELECTED_REPORT') {
         sendResponse({
-            selectedReports: Array.from(selectedReports.values())
+            selectedReport: selectedReport
         });
         return false;
     }
 
-    if (req.action === 'CLEAR_SELECTED_REPORTS') {
+    // 기능 추가 : 선택 해제
+    if (req.action === 'CLEAR_SELECTED_REPORT') {
         removeAllReportCheckboxes();
         if (reportModeEnabled) {
             applyReportCheckboxes();
