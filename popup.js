@@ -1,8 +1,14 @@
 // 팝업이 열릴 때 저장된 설정 불러오기
 document.addEventListener('DOMContentLoaded', () => {
-  chrome.storage.local.get(['blurEnabled', 'softEnabled'], (result) => {
+  chrome.storage.local.get(['blurEnabled', 'softEnabled', 'reportModeEnabled'], (result) => {
     document.getElementById('blur-toggle').checked = result.blurEnabled || false;
     document.getElementById('soft-toggle').checked = result.softEnabled || false;
+
+    // 기능 추가 : 신고 모드 상태 복원
+    const reportModeToggle = document.getElementById('report-mode-toggle');
+    if (reportModeToggle) {
+      reportModeToggle.checked = result.reportModeEnabled || false;
+    }
   });
 });
 
@@ -23,7 +29,7 @@ document.getElementById('soft-toggle').addEventListener('change', (e) => {
 });
 
 
-// 기능 추가 : 신고 모드/선택 댓글 미리보기/선택 신고 로직
+// 기능 추가 : 신고 모드 / 선택된 댓글 신고 로직
 document.addEventListener('DOMContentLoaded', () => {
   const reportModeToggle = document.getElementById('report-mode-toggle');
   const reportBtn = document.getElementById('report-btn');
@@ -31,7 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const reportStatus = document.getElementById('report-status');
   const reportPreview = document.getElementById('report-preview');
 
-  if (!reportModeToggle || !reportBtn || !reportClearBtn) return;
+  if (!reportModeToggle || !reportBtn || !reportClearBtn || !reportPreview) return;
 
   async function getActiveTab() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -39,73 +45,77 @@ document.addEventListener('DOMContentLoaded', () => {
     return tab;
   }
 
-  function setPreviewText(selected) {
-    if (!selected) {
+  function renderSelectedReports(selectedReports = []) {
+    if (!selectedReports.length) {
       reportPreview.textContent = '선택된 댓글이 없습니다.';
       return;
     }
-    // 미리보기는 원문/변환문 중 원하는 걸 보여주면 됨(여긴 둘 다)
+
+    const previewLines = selectedReports.slice(0, 3).map((item, idx) => {
+      return `${idx + 1}. ${item.transformed_text}`;
+    });
+
+    const extra = selectedReports.length > 3
+      ? `\n외 ${selectedReports.length - 3}개`
+      : '';
+
     reportPreview.textContent =
-      `원문:\n${selected.original_text}\n\n순화/변환:\n${selected.transformed_text}`;
+      `선택된 댓글 ${selectedReports.length}개\n\n${previewLines.join('\n\n')}${extra}`;
   }
 
-  async function refreshSelectedPreview() {
+  async function refreshSelectedReports() {
     try {
       const tab = await getActiveTab();
-      const resp = await chrome.tabs.sendMessage(tab.id, { action: 'GET_SELECTED_REPORT' });
-      setPreviewText(resp?.selected || null);
-    } catch (e) {
-      // 팝업이 열렸을 때 content script가 아직 준비 안된 경우도 있으니 조용히 처리
-      setPreviewText(null);
+      const response = await chrome.tabs.sendMessage(tab.id, {
+        action: 'GET_SELECTED_REPORTS'
+      });
+      renderSelectedReports(response?.selectedReports || []);
+    } catch (error) {
+      renderSelectedReports([]);
     }
   }
 
-  // 기능 추가 : 신고 모드 상태 로드 + content로 동기화
-  chrome.storage.local.get(['reportModeEnabled'], async (result) => {
-    const enabled = result.reportModeEnabled || false;
-    reportModeToggle.checked = enabled;
+  // 기능 추가 : popup 열릴 때 현재 선택 상태 갱신
+  refreshSelectedReports();
 
-    try {
-      const tab = await getActiveTab();
-      await chrome.tabs.sendMessage(tab.id, { action: 'SET_REPORT_MODE', enabled });
-    } catch (e) {
-      // ignore
-    }
-
-    refreshSelectedPreview();
-  });
-
-  // 기능 추가 : 신고 모드 토글 변경 → storage 저장 + content에 전달
+  // 기능 추가 : 신고 모드 toggle 저장 + content에 전달
   reportModeToggle.addEventListener('change', async (e) => {
     const enabled = e.target.checked;
-    reportStatus.textContent = enabled ? '신고 모드가 켜졌습니다. 문제 댓글을 클릭하세요.' : '신고 모드가 꺼졌습니다.';
-
     chrome.storage.local.set({ reportModeEnabled: enabled });
 
     try {
       const tab = await getActiveTab();
-      await chrome.tabs.sendMessage(tab.id, { action: 'SET_REPORT_MODE', enabled });
-      // 토글 직후 미리보기 갱신
-      await refreshSelectedPreview();
-    } catch (err) {
-      reportStatus.textContent = '실패: ' + err.message;
+      await chrome.tabs.sendMessage(tab.id, {
+        action: 'SET_REPORT_MODE',
+        enabled
+      });
+
+      reportStatus.textContent = enabled
+        ? '신고 모드가 켜졌습니다. 페이지에서 체크박스를 선택하세요.'
+        : '신고 모드가 꺼졌습니다.';
+
+      refreshSelectedReports();
+    } catch (error) {
+      reportStatus.textContent = '실패: ' + error.message;
     }
   });
 
-  // 기능 추가 : 선택 해제 버튼
+  // 기능 추가 : 선택 해제
   reportClearBtn.addEventListener('click', async () => {
-    reportStatus.textContent = '';
     try {
       const tab = await getActiveTab();
-      await chrome.tabs.sendMessage(tab.id, { action: 'CLEAR_SELECTED_REPORT' });
-      setPreviewText(null);
+      await chrome.tabs.sendMessage(tab.id, {
+        action: 'CLEAR_SELECTED_REPORTS'
+      });
+
       reportStatus.textContent = '선택이 해제되었습니다.';
-    } catch (err) {
-      reportStatus.textContent = '실패: ' + err.message;
+      renderSelectedReports([]);
+    } catch (error) {
+      reportStatus.textContent = '실패: ' + error.message;
     }
   });
 
-  // 기능 추가 : “선택 댓글 신고” 버튼 → 선택된 1개만 서버로 전송
+  // 기능 추가 : 선택된 댓글만 신고
   reportBtn.addEventListener('click', async () => {
     reportBtn.disabled = true;
     reportClearBtn.disabled = true;
@@ -114,15 +124,18 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const tab = await getActiveTab();
 
-      const selectedResp = await chrome.tabs.sendMessage(tab.id, { action: 'GET_SELECTED_REPORT' });
-      const selected = selectedResp?.selected;
+      const selectedResponse = await chrome.tabs.sendMessage(tab.id, {
+        action: 'GET_SELECTED_REPORTS'
+      });
 
-      if (!selected) {
-        throw new Error('선택된 댓글이 없습니다. 신고 모드 ON 후 댓글을 클릭하세요.');
+      const selectedReports = selectedResponse?.selectedReports || [];
+
+      if (!selectedReports.length) {
+        throw new Error('선택된 댓글이 없습니다.');
       }
 
       const payload = {
-        comments: [selected],
+        comments: selectedReports,
         extension_version: "1.0",
         report_type: "fine_tuning_collection"
       };
@@ -134,24 +147,16 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       if (response?.success) {
-        reportStatus.textContent = '신고가 성공적으로 전송되었습니다.';
-        // 선택을 자동 해제하고 싶으면 아래 2줄 활성화
-        // await chrome.tabs.sendMessage(tab.id, { action: 'CLEAR_SELECTED_REPORT' });
-        // setPreviewText(null);
+        reportStatus.textContent = `신고가 성공적으로 전송되었습니다. (${selectedReports.length}개)`;
       } else {
         throw new Error(response?.error || '전송 실패');
       }
-
     } catch (error) {
       reportStatus.textContent = '실패: ' + error.message;
     } finally {
       reportBtn.disabled = false;
       reportClearBtn.disabled = false;
-      // 전송 후 미리보기 갱신
-      refreshSelectedPreview();
+      refreshSelectedReports();
     }
   });
-
-  // 기능 추가 : 팝업이 열릴 때마다 미리보기 최신화
-  refreshSelectedPreview();
 });

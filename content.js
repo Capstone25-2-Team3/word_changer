@@ -21,6 +21,10 @@ let globalDictionary = {};
 let isBlurActive = false;
 let isSoftActive = false;
 
+// 기능 추가 : 신고 모드 상태 및 선택된 댓글 저장소
+let reportModeEnabled = false;
+let selectedReports = new Map();
+
 // CSS 스타일 추가
 function injectStyles() {
     // 이미 스타일이 주입되었는지 확인하는 식별자
@@ -41,6 +45,27 @@ function injectStyles() {
             /* 배경색을 추가하여 글자 영역을 가려 블라인드 느낌 강조 (선택 사항) */
             /* background-color: #f0f0f0; */ 
         }
+
+        /* 기능 추가 : 신고용 체크박스 스타일 */
+        .report-checkbox {
+            margin-right: 8px;
+            cursor: pointer;
+            vertical-align: middle;
+        }
+
+        /* 기능 추가 : 신고 체크박스 wrapper */
+        .report-checkbox-wrapper {
+            display: inline-flex;
+            align-items: center;
+            margin-right: 6px;
+            vertical-align: middle;
+        }
+
+        /* 기능 추가 : 선택된 댓글 하이라이트 */
+        .report-selected-comment {
+            outline: 2px solid #2196F3;
+            border-radius: 6px;
+        }
     `;
 
     document.head.appendChild(style);
@@ -59,6 +84,166 @@ function createRequestBody(textList) {
 }
 
 const apiUrl = 'http://3.39.120.138:8000/predict';
+
+// 기능 추가 : 신고 체크박스용 유니크 id 시퀀스
+let reportTargetIdCounter = 0;
+
+// 기능 추가 : 신고 대상 댓글에 고유 id 부여
+function ensureReportTargetId(element) {
+    let targetId = element.getAttribute('data-report-target-id');
+    if (!targetId) {
+        targetId = `report-target-${Date.now()}-${reportTargetIdCounter++}`;
+        element.setAttribute('data-report-target-id', targetId);
+    }
+    return targetId;
+}
+
+// 기능 추가 : 현재 사이트 key 반환
+function getCurrentSiteKey() {
+    const hostname = window.location.hostname;
+    if (hostname.includes('youtube.com')) return 'Youtube';
+    if (hostname.includes('dcinside.com')) return 'DCinside';
+    return 'default';
+}
+
+// 기능 추가 : 플랫폼 판별
+function detectPlatform() {
+    const h = window.location.hostname;
+    if (h.includes('youtube.com')) return 'youtube';
+    if (h.includes('dcinside.com')) return 'dcinside';
+    return 'unknown';
+}
+
+// 기능 추가 : sha256(hex) 계산
+async function sha256Hex(str) {
+    const enc = new TextEncoder();
+    const buf = await crypto.subtle.digest('SHA-256', enc.encode(str));
+    return Array.from(new Uint8Array(buf))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
+}
+
+// 기능 추가 : 신고 UI용 selector는 댓글 텍스트 span이 아니라 댓글 컨테이너 기준으로 분리
+const reportSelectorsBySite = {
+    'Youtube': '#content-text',
+    'DCinside': '.usertxt.ub-word'
+};
+
+// 기능 추가 : 실제 신고 데이터가 들어있는 요소 찾기
+function getReportDataElement(element, site) {
+    if (!element) return null;
+
+    if (site === 'Youtube') {
+        if (element.hasAttribute('data-original-text-for-report')) return element;
+        return element.querySelector('span[data-original-text-for-report], span[data-text-transformed="true"]');
+    }
+
+    return element;
+}
+
+// 기능 추가 : 변환 데이터 요소(span)에서 체크박스를 붙일 댓글 컨테이너 찾기
+function getReportTargetElementFromDataElement(element, site) {
+    if (!element) return null;
+
+    if (site === 'Youtube') {
+        return element.closest('#content-text') || element;
+    }
+
+    return element;
+}
+
+// 기능 추가 : 체크박스 선택 시 선택된 댓글 Map에 반영
+async function updateSelectedReport(targetElement, checked, site) {
+    const dataElement = getReportDataElement(targetElement, site);
+    if (!dataElement) return;
+
+    const original = dataElement.getAttribute('data-original-text-for-report');
+    const transformedText = dataElement.textContent;
+    const targetId = ensureReportTargetId(targetElement);
+
+    if (!original || !original.trim()) return;
+
+    const hash = await sha256Hex(original);
+
+    if (checked) {
+        selectedReports.set(targetId, {
+            comment_id: crypto.randomUUID(),
+            original_text: original,
+            transformed_text: transformedText,
+            url: window.location.href,
+            platform: detectPlatform(),
+            timestamp: new Date().toISOString(),
+            model_version: "kobert_v1",
+            predicted_labels: {},
+            hash
+        });
+        targetElement.classList.add('report-selected-comment');
+    } else {
+        selectedReports.delete(targetId);
+        targetElement.classList.remove('report-selected-comment');
+    }
+}
+
+// 기능 추가 : 댓글 요소 옆에 체크박스 주입
+function addReportCheckboxToElement(targetElement, site) {
+    if (!reportModeEnabled) return;
+    if (!targetElement || targetElement.nodeType !== 1) return;
+    if (targetElement.getAttribute('data-report-checkbox-initialized') === 'true') return;
+
+    const dataElement = getReportDataElement(targetElement, site);
+    if (!dataElement) return;
+
+    const original = dataElement.getAttribute('data-original-text-for-report');
+    if (!original || !original.trim()) return;
+
+    ensureReportTargetId(targetElement);
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'report-checkbox';
+
+    const wrapper = document.createElement('span');
+    wrapper.className = 'report-checkbox-wrapper';
+
+    wrapper.appendChild(checkbox);
+
+    if (!targetElement.parentNode) return;
+    targetElement.parentNode.insertBefore(wrapper, targetElement);
+
+    checkbox.addEventListener('click', (e) => {
+        e.stopPropagation();
+    });
+
+    checkbox.addEventListener('change', async (e) => {
+        await updateSelectedReport(targetElement, e.target.checked, site);
+    });
+
+    targetElement.setAttribute('data-report-checkbox-initialized', 'true');
+}
+
+// 기능 추가 : 체크박스 전체 제거
+function removeAllReportCheckboxes() {
+    document.querySelectorAll('.report-checkbox-wrapper').forEach(wrapper => {
+        wrapper.remove();
+    });
+
+    document.querySelectorAll('[data-report-checkbox-initialized="true"]').forEach(el => {
+        el.removeAttribute('data-report-checkbox-initialized');
+        el.classList.remove('report-selected-comment');
+    });
+
+    selectedReports.clear();
+}
+
+// 기능 추가 : 신고 모드 ON 시 현재 변환된 댓글에 체크박스 일괄 주입
+function applyReportCheckboxes() {
+    const site = getCurrentSiteKey();
+    const selectors = reportSelectorsBySite[site];
+    if (!selectors) return;
+
+    const targetElements = document.querySelectorAll(selectors);
+    targetElements.forEach(el => addReportCheckboxToElement(el, site));
+}
 
 // 함수 실행 및 결과 처리
 async function runPostExample(formData, elementList) {
@@ -89,16 +274,21 @@ async function runPostExample(formData, elementList) {
 
         if (response && response.success) {
             elementList.forEach(element => {
-            const originalText = element.getAttribute('data-original-text');
-            if (originalText in globalDictionary) {
-                element.textContent = globalDictionary[originalText];
-                element.setAttribute('data-text-transformed', 'true');
-                element.removeAttribute('data-original-text');
-                if(isSoftActive || originalText == globalDictionary[originalText])
-                    element.classList.remove('text-blur-in-progress');
-                console.log(`[변환 완료] 원본: "${originalText}" -> 변환 후: "${globalDictionary[originalText]}"`);
-            }
-        });
+                const originalText = element.getAttribute('data-original-text');
+                if (originalText in globalDictionary) {
+                    element.textContent = globalDictionary[originalText];
+                    element.setAttribute('data-text-transformed', 'true');
+                    element.removeAttribute('data-original-text');
+                    if(isSoftActive || originalText == globalDictionary[originalText])
+                        element.classList.remove('text-blur-in-progress');
+                    console.log(`[변환 완료] 원본: "${originalText}" -> 변환 후: "${globalDictionary[originalText]}"`);
+
+                    // 기능 추가 : 신고 모드가 켜져 있으면 변환 완료된 댓글에 체크박스 추가
+                    const site = getCurrentSiteKey();
+                    const reportTarget = getReportTargetElementFromDataElement(element, site);
+                    addReportCheckboxToElement(reportTarget, site);
+                }
+            });
             return response.data;
         } else if (response && response.error) {
             // Background Script에서 fetch가 실패하여 받은 오류 처리
@@ -142,13 +332,17 @@ function transformText(targetNode, site) {
                 element.setAttribute('data-text-transformed', 'true');
                 element.removeAttribute('data-original-text');
                 element.classList.remove('text-blur-in-progress');
+
+                // 기능 추가 : 신고용 원문 보존 및 체크박스 추가
+                element.setAttribute('data-original-text-for-report', originalText);
+                const reportTarget = getReportTargetElementFromDataElement(element, site);
+                addReportCheckboxToElement(reportTarget, site);
             }
             else {
                 sentences.push(originalText);
-
                 element.setAttribute('data-original-text', originalText);
 
-                // 기능 추가 : 신고용 원문 보존(변환 완료 후 data-original-text가 지워지므로 별도 유지)
+                // 기능 추가 : 신고용 원문 보존
                 element.setAttribute('data-original-text-for-report', originalText);
 
                 element.classList.add('text-blur-in-progress');
@@ -181,7 +375,19 @@ function setupObserver(site) {
             if (mutation.type === 'childList') {
                 mutation.addedNodes.forEach(node => {
                     // 추가된 노드에 대해 텍스트 변환 로직 실행
-                    if(isBlurActive || isSoftActive) transformText(node, site); 
+                    if(isBlurActive || isSoftActive) transformText(node, site);
+
+                    // 기능 추가 : 신고 모드 ON이면 동적으로 추가된 댓글에도 체크박스 적용
+                    if (reportModeEnabled && node.nodeType === 1) {
+                        const selectors = reportSelectorsBySite[site];
+                        if (selectors) {
+                            if (node.matches && node.matches(selectors)) {
+                                addReportCheckboxToElement(node, site);
+                            } else {
+                                node.querySelectorAll(selectors).forEach(el => addReportCheckboxToElement(el, site));
+                            }
+                        }
+                    }
                 });
             }
         }
@@ -241,10 +447,13 @@ async function main() {
 
     // 2. 스토리지에서 설정값을 가져올 때까지 '기다림(await)'
     // 결과가 올 때까지 아래 줄(console.log 등)로 넘어가지 않습니다.
-    const result = await chrome.storage.local.get(['blurEnabled', 'softEnabled']);
+    const result = await chrome.storage.local.get(['blurEnabled', 'softEnabled', 'reportModeEnabled']);
     
     isBlurActive = result.blurEnabled ?? false;
     isSoftActive = result.softEnabled ?? false;
+
+    // 기능 추가 : 신고 모드 상태 복원
+    reportModeEnabled = result.reportModeEnabled ?? false;
 
     console.log("✅ 설정 로드 완료 (이후 로직 실행):", isBlurActive, isSoftActive);
 
@@ -257,6 +466,11 @@ async function main() {
     } else {
         defaultHandler();
     }
+
+    // 기능 추가 : 신고 모드가 켜져 있으면 현재 화면에 체크박스 적용
+    if (reportModeEnabled) {
+        applyReportCheckboxes();
+    }
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -268,6 +482,17 @@ chrome.storage.onChanged.addListener((changes, area) => {
         if (changes.softEnabled) {
             isSoftActive = changes.softEnabled.newValue;
             console.log("Blur 전역변수 변경됨:", isSoftActive);
+        }
+
+        // 기능 추가 : 신고 모드 상태 변경 감지
+        if (changes.reportModeEnabled) {
+            reportModeEnabled = changes.reportModeEnabled.newValue;
+
+            if (reportModeEnabled) {
+                applyReportCheckboxes();
+            } else {
+                removeAllReportCheckboxes();
+            }
         }
     }
 });
@@ -283,6 +508,10 @@ function handleNavigation() {
         console.log("🚀 URL 변경 감지됨:", newUrl);
         currentUrl = newUrl;
         globalDictionary = {}; // URL 변경 시 사전 초기화
+
+        // 기능 추가 : 페이지 이동 시 신고 선택 초기화
+        selectedReports.clear();
+
         main(); // Observer 재설정 및 변환 실행
     }
 }
@@ -308,180 +537,36 @@ injectStyles();
 main();
 
 
-// 기능 추가 : 신고 데이터 수집 유틸 및 메시지 핸들러
-
-// 기능 추가 : 동일 원문 중복 신고 방지(Set)
-const reportedHashes = new Set();
-
-// 기능 추가 : sha256(hex) 계산 (원문 기반 중복 제거용)
-async function sha256Hex(str) {
-    const enc = new TextEncoder();
-    const buf = await crypto.subtle.digest('SHA-256', enc.encode(str));
-    return Array.from(new Uint8Array(buf))
-        .map(b => b.toString(16).padStart(2, '0'))
-        .join('');
-}
-
-// 기능 추가 : 플랫폼 판별
-function detectPlatform() {
-    const h = window.location.hostname;
-    if (h.includes('youtube.com')) return 'youtube';
-    if (h.includes('dcinside.com')) return 'dcinside';
-    return 'unknown';
-}
-
-// 기능 추가 : 변환 완료된 댓글 수집
-async function collectTransformed(site) {
-    const selectors = selectorsBySite[site];
-    if (!selectors) return [];
-
-    // 변환 완료된 댓글만 수집
-    const transformedElements = document.querySelectorAll(
-        `${selectors}[data-text-transformed="true"]`
-    );
-
-    const results = [];
-    const platform = detectPlatform();
-    const url = window.location.href;
-
-    for (const el of transformedElements) {
-        const original = el.getAttribute('data-original-text-for-report');
-        const transformedText = el.textContent;
-
-        if (!original || !original.trim()) continue;
-
-        const hash = await sha256Hex(original);
-
-        if (reportedHashes.has(hash)) continue;
-        reportedHashes.add(hash);
-
-        results.push({
-            comment_id: crypto.randomUUID(),
-            original_text: original,
-            transformed_text: transformedText,
-            url,
-            platform,
-            timestamp: new Date().toISOString(),
-            model_version: "kobert_v1",
-            predicted_labels: {},
-            hash
-        });
-    }
-
-    return results;
-}
-
-// 기능 추가 : 신고 모드에서 “선택된 댓글(1개)” 저장 상태
-let reportModeEnabled = false;
-let selectedReport = null;
-let selectedElement = null;
-
-// 기능 추가 : 선택 하이라이트 스타일 주입 (기존 injectStyles는 건드리지 않음)
-(function injectReportSelectStyles() {
-    if (document.getElementById('report-select-styles')) return;
-    const style = document.createElement('style');
-    style.id = 'report-select-styles';
-    style.textContent = `
-        .report-selected-comment {
-            outline: 2px solid #2196F3;
-            border-radius: 6px;
-        }
-    `;
-    document.head.appendChild(style);
-})();
-
-// 기능 추가 : 신고용 클릭 선택은 “댓글 컨테이너”를 잡아야 하므로 selector를 별도로 둠
-const reportSelectorsBySite = {
-    'Youtube': '#content-text',     // span보다 상위 컨테이너가 클릭 선택에 유리
-    'DCinside': '.usertxt.ub-word'
-};
-
-// 기능 추가 : 신고 모드 ON 시, 사용자가 클릭한 댓글을 선택
-document.addEventListener('click', async (e) => {
-    if (!reportModeEnabled) return;
-
-    const hostname = window.location.hostname;
-    const site = hostname.includes('youtube.com') ? 'Youtube'
-              : hostname.includes('dcinside.com') ? 'DCinside'
-              : 'default';
-
-    const selector = reportSelectorsBySite[site];
-    if (!selector) return;
-
-    const commentEl = e.target.closest(selector);
-    if (!commentEl) return;
-
-    // 변환된 댓글만 선택 대상으로
-    if (commentEl.getAttribute('data-text-transformed') !== 'true') return;
-
-    const original = commentEl.getAttribute('data-original-text-for-report');
-    const transformedText = commentEl.textContent || '';
-    if (!original || !original.trim()) return;
-
-    // 기존 선택 하이라이트 제거
-    if (selectedElement) selectedElement.classList.remove('report-selected-comment');
-    selectedElement = commentEl;
-    selectedElement.classList.add('report-selected-comment');
-
-    const hash = await sha256Hex(original);
-
-    selectedReport = {
-        comment_id: crypto.randomUUID(),
-        original_text: original,
-        transformed_text: transformedText,
-        url: window.location.href,
-        platform: detectPlatform(),
-        timestamp: new Date().toISOString(),
-        model_version: "kobert_v1",
-        predicted_labels: {},
-        hash
-    };
-}, true);
-
-// 기능 추가 : popup에서 SET_REPORT_MODE / GET_SELECTED_REPORT / CLEAR_SELECTED_REPORT 요청 수신
+// 기능 추가 : popup에서 신고 관련 요청 수신
 chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
-
     if (req.action === 'SET_REPORT_MODE') {
         reportModeEnabled = !!req.enabled;
+
+        if (reportModeEnabled) {
+            applyReportCheckboxes();
+        } else {
+            removeAllReportCheckboxes();
+        }
+
         sendResponse({ ok: true, enabled: reportModeEnabled });
         return false;
     }
 
-    if (req.action === 'GET_SELECTED_REPORT') {
-        sendResponse({ selected: selectedReport });
+    if (req.action === 'GET_SELECTED_REPORTS') {
+        sendResponse({
+            selectedReports: Array.from(selectedReports.values())
+        });
         return false;
     }
 
-    if (req.action === 'CLEAR_SELECTED_REPORT') {
-        if (selectedElement) selectedElement.classList.remove('report-selected-comment');
-        selectedElement = null;
-        selectedReport = null;
+    if (req.action === 'CLEAR_SELECTED_REPORTS') {
+        removeAllReportCheckboxes();
+        if (reportModeEnabled) {
+            applyReportCheckboxes();
+        }
+
         sendResponse({ ok: true });
         return false;
-    }
-
-    // 기능 추가 : 기존(전체 수집) 요청도 유지
-    if (req.action === 'COLLECT_TRANSFORMED') {
-        const hostname = window.location.hostname;
-        const site = hostname.includes('youtube.com') ? 'Youtube'
-                    : hostname.includes('dcinside.com') ? 'DCinside'
-                    : 'default';
-
-        collectTransformed(site)
-            .then(comments => {
-                sendResponse({
-                    payload: {
-                        comments,
-                        extension_version: "1.0",
-                        report_type: "fine_tuning_collection"
-                    }
-                });
-            })
-            .catch(err => {
-                sendResponse({ error: err.message });
-            });
-
-        return true; // async sendResponse
     }
 
     return false;
